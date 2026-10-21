@@ -1,0 +1,98 @@
+= picodev-lab-client
+
+Client TypeScript du MCP de Picodev Lab (https://lab.picodev.fr/mcp) : appels des
+outils, état de la session, bornes du hub vérifiées avant l'envoi. Partagé par
+l'extension VS Code et le panneau du plugin Claude Code.
+
+== Usage
+
+[source,ts]
+----
+import { LabClient, LabError } from "picodev-lab-client";
+
+const lab = new LabClient();                 // { url } pour un autre hub, { post } pour un autre envoi
+await lab.tools();                           // [{ name, description }] servis par le hub
+await lab.list_setups();
+const { open_url } = await lab.open_session({ setup: "setup-a", mode: "free" });
+// l'humain ouvre open_url dans son navigateur
+await lab.push_to_editor({ files: [{ name: "sketch.ino", content }] });
+const st = await lab.status();               // session_status, à relire toutes les 2 s au plus
+await lab.close_session();
+----
+
+`status().capture` (hub v0.6.1) : la capture de la session, `{ id, kind, state }`
+(`logic` ou `analog` ; `recording`, `ready` ou `failed`), ou `null`. L'hôte la lit
+par `read_capture` une seule fois, quand `state` passe à `ready` (l'appel est
+signalé au propriétaire) ; le client ne suit pas ce changement.
+
+`next_level()` (contrat 0.8.3) : en Défi, passe au niveau suivant comme le bouton
+« Niveau suivant » du banc, et rend `{ level, levels }`, le nouveau niveau. Le hub
+le refuse sans rien envoyer (`LabError` `hub`, avec son texte) hors Défi, quand les
+tests du niveau ne sont pas tous réussis ou au dernier niveau, et `no_browser` sans
+propriétaire connecté.
+
+Une méthode par outil du hub, mêmes noms, arguments en objet ; `session` et
+`agent_token` sont ajoutés par le client. `brief_submit` et `request_meeting` ne
+joignent la session que sur `with_session: true` (accord du visiteur ; l'option
+n'est pas transmise au hub).
+`spec_draft` (l'entretien de la spec, contrat 0.14) ne joint jamais la session.
+`push_program` (contrat 0.15) envoie un programme compilé par l'agent (Intel HEX, 48 Kio au
+plus, vérifié aussi par le hub) et ses sources éventuelles ; `push_to_editor` reste le repli.
+
+Un résultat qui porte des contenus `image` (`read_setup` avec `schema.png`,
+`read_capture` en `format: "png"`, `bench_snapshot`) est rendu comme les autres,
+avec en plus `images` : `[{ mimeType, data }]`, `data` en base 64.
+
+Les erreurs du hub et les refus locaux sont des `LabError` avec leur texte (celui
+du hub, sans le préfixe « Error executing tool <nom>: » de FastMCP) et un `kind` :
+`gone` (session inconnue ou finie, ou aucune session tenue), `no_browser` (aucun
+navigateur connecté à la session), `limit` (plus de 8 fichiers ou de 64 Kio, ou un
+circuit de plus de 40 composants ou 120 fils, refusé sans appel), `hub` (toute autre erreur du hub), `transport` (pas de réponse JSON-RPC
+lisible). Un outil de session appelé sans session tenue est refusé `gone` sans
+aucune requête. `lab.session` se lit pour garder la session côté hôte et s'affecte
+pour la reprendre ; il redevient `null` après `close_session` ou `gone`.
+
+Transport : un `POST` JSON-RPC par appel (`tools/list`, `tools/call`), sans
+`initialize` ni SDK, réponse lue en JSON ou dans la dernière ligne `data:` d'un
+flux SSE. Le client n'utilise que le langage, `JSON` et `TextEncoder` : ni `fetch`
+(sauf l'envoi par défaut), ni minuteries, ni flux, ni `import()`, ni `new Function`.
+
+Installation dans un hôte, par un tag :
+`npm i github:PICODEV-SAS/picodev-lab-client#v0.7.1` (le script `prepare` compile
+`dist/` à l'installation). Sortie CommonJS, Node 20 au moins ; l'envoi par défaut
+est le `fetch` global (Node 20, VS Code).
+
+== Dans un mod de Claude Code
+
+Un plugin s'installe sans `npm install` : `npm run bundle` produit
+`dist/picodev-lab-client.mjs`, un seul fichier ESM minifié, sans dépendance, avec
+ses types dans `dist/picodev-lab-client.d.mts`. Le plugin les copie depuis un tag
+dans `hooks/vendor/`, les importe par un chemin relatif, et passe `$.http.fetch`
+comme envoi (le moteur des mods n'a pas de `fetch`) :
+
+[source,ts]
+----
+import { LabClient } from './vendor/picodev-lab-client.mjs'
+
+const lab = new LabClient({
+  url: `${hub}/mcp`,
+  post: async (url, body, headers) => {
+    const r = await $.http.fetch(url, { method: 'POST', headers, body })
+    return { status: r.status, text: r.text, headers: r.headers }
+  },
+})
+----
+
+`claude plugin validate` accepte ce fichier (il refuse tout `import()`).
+
+== Vérifications
+
+`npm run build`, `npm test` : un `post` factice tient lieu de hub, et le fichier
+unique tourne dans un contexte `node:vm` qui n'offre que `TextEncoder`, sans
+génération de code. `LAB_LIVE=1 npm test` appelle aussi `tools()`, `list_setups`,
+`read_setup` (`setup-a`, avec son image) et un outil sur une session inconnue, ouvre une session `setup-a` en Libre pour vérifier `capture` dans `status()` puis la ferme, sur
+lab.picodev.fr avec l'envoi par défaut.
+
+== Licence
+
+Apache 2.0 (`LICENSE`). Copyright 2026 Picodev SAS.

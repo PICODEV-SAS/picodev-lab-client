@@ -1,0 +1,26 @@
+{
+  "name": "picodev-lab-client",
+  "version": "0.7.1",
+  "description": "TypeScript client of the Picodev Lab hub's MCP",
+  "license": "Apache-2.0",
+  "repository": "github:PICODEV-SAS/picodev-lab-client",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepare": "tsc",
+    "test": "npm run bundle && node --test",
+    "bundle": "tsc && esbuild src/index.ts --bundle --platform=neutral --target=es2022 --format=esm --minify --outfile=dist/picodev-lab-client.mjs && cp dist/index.d.ts dist/picodev-lab-client.d.mts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "esbuild": "^0.28.2",
+    "typescript": "~5.9"
+  }
+}
