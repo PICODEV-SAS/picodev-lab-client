@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.0
+
+Contract 0.21.
+
+- `submit_answer({ test, value })`: in challenge mode, proposes `value` for the `answer` test `test` of
+  the current level; one per second per session, the verdict is `ok` (true: correct, false: wrong answer).
+- `read_simulation().challenge.brief.hints` now lists only the hints the visitor revealed (type unchanged).
+
 ## 0.8.0
 
 Contract 0.20.

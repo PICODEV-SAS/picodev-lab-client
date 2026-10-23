@@ -31,6 +31,11 @@ banc, comme `queue_status` la rend, et le lien de partage signé (`/p/<partage>`
 `decode_capture` décode une capture logique prête (`uart`, `spi`, `i2c`), son
 résultat typé selon `protocol`.
 
+`submit_answer({ test, value })` (contrat 0.21) : en Défi, propose `value` pour le test
+`answer` nommé `test` du niveau courant, rend `{ test, ok }` ; une par seconde et par
+session, `ok` est le verdict (vrai : bonne réponse, faux : mauvaise). `challenge.brief.hints` de `read_simulation()`
+ne liste que les indices révélés par le visiteur.
+
 `next_level()` (contrat 0.8.3) : en Défi, passe au niveau suivant comme le bouton
 « Niveau suivant » du banc, et rend `{ level, levels }`, le nouveau niveau. Le hub
 le refuse sans rien envoyer (`LabError` `hub`, avec son texte) hors Défi, quand les

@@ -1,6 +1,6 @@
 {
   "name": "picodev-lab-client",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "TypeScript client of the Picodev Lab hub's MCP",
   "license": "Apache-2.0",
   "repository": "github:PICODEV-SAS/picodev-lab-client",

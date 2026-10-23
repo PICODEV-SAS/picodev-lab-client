@@ -255,7 +255,7 @@ test("session tools without a session: gone, no request at all", async () => {
     () => c.set_visibility({ visibility: "link" }), () => c.queue_join({ kind: "uno" }), () => c.queue_status(), () => c.queue_leave(),
     () => c.close_session(), () => c.capture_logic(), () => c.read_capture({ capture: "c1" }),
     () => c.decode_capture({ capture: "c1", protocol: "i2c", channels: { scl: 2, sda: 3 } }),
-    () => c.capture_analog(), () => c.push_circuit({ components: [], wires: [] }), () => c.bench_snapshot(), () => c.next_level(),
+    () => c.capture_analog(), () => c.push_circuit({ components: [], wires: [] }), () => c.bench_snapshot(), () => c.next_level(), () => c.submit_answer({ test: "t", value: "v" }),
     () => c.brief_submit({ title: "T", with_session: true }),
     () => c.request_meeting({ contact: { name: "A", email: "a@b.c" }, context: "", availabilities: { text: "" }, consent: true, with_session: true })])
     await assert.rejects(call(), kind("gone", "No session: call open_session first."));
@@ -391,4 +391,12 @@ test("live: session_status carries capture (hub v0.6.1) on lab.picodev.fr", { sk
   } finally {
     await c.close_session();
   }
+});
+
+test("submit_answer posts the tool with session, agent_token, test, value", async () => {
+  const hub = fakeHub({ ...base, submit_answer: () => ({ test: "t1", ok: true }) });
+  const c = new LabClient({ post: hub.post });
+  await c.open_session({ setup: "setup-a", mode: "challenge" });
+  assert.deepEqual(await c.submit_answer({ test: "t1", value: "42" }), { test: "t1", ok: true });
+  assert.deepEqual(hub.calls.at(-1), { name: "submit_answer", args: { session: "s1", agent_token: "t1", test: "t1", value: "42" } });
 });

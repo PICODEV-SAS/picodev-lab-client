@@ -329,6 +329,12 @@ export class LabClient {
   bench_snapshot(): Promise<{ images: ToolImage[] }> { return this.withSession("bench_snapshot"); }
   /** Challenge mode: the bench's "Next level", only when it would be offered; returns the new level (contract 0.8.3). */
   next_level(): Promise<{ level: number; levels: number }> { return this.withSession("next_level"); }
+  /**
+   * Challenge mode only: proposes `value` for the `answer` test `test` of the current level (contract 0.21).
+   * One per second per session; `ok` is the verdict itself (true: correct, the test passes in the bench; false: wrong answer).
+   * `read_simulation().challenge.brief.hints` lists only the hints the visitor revealed in the bench.
+   */
+  submit_answer(args: { test: string; value: string }): Promise<{ test: string; ok: boolean }> { return this.withSession("submit_answer", args); }
 
   // The visitor's lab session goes with a brief or a meeting request only when asked (with_session: true,
   // not sent to the hub): sending what they did at the lab needs their consent. Without a held session: gone.
