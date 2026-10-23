@@ -16,7 +16,10 @@ const PNG = { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" };
 const JPEG = { type: "image", data: "/9j/4AAQ", mimeType: "image/jpeg" };
 const withImage = (out, ...images) => ({ [RAW]: { content: [{ type: "text", text: JSON.stringify(out, null, 2) }, ...images], isError: false } });
 
-// tools: {name: (args) => result | throws Error(text)}. sse: answer as an SSE stream. Returns post + calls.
+// An error a hub of contract 0.20 codes: the code goes in the tool result's _meta.
+const coded = (text, code) => Object.assign(new Error(text), { code });
+
+// tools: {name: (args) => result | throws Error(text), with a code when made by coded()}. sse: answer as an SSE stream. Returns post + calls.
 function fakeHub(tools, { sse = false } = {}) {
   const calls = [];
   const post = async (url, body, headers) => {
@@ -35,7 +38,7 @@ function fakeHub(tools, { sse = false } = {}) {
         const wrapped = out !== null && typeof out === "object" && !Array.isArray(out) ? out : { result: out };
         result = out?.[RAW] ?? { content: [{ type: "text", text: typeof out === "string" ? out : JSON.stringify(out) }], structuredContent: wrapped };
       } catch (e) {
-        result = { content: [{ type: "text", text: e.message }], isError: true };
+        result = { content: [{ type: "text", text: e.message }], isError: true, ...(e.code && { _meta: { "lab.picodev.fr/error": e.code } }) };
       }
     } else {
       return { status: 200, text: JSON.stringify({ jsonrpc: "2.0", id: req.id, error: { code: -32601, message: "Method not found" } }) };
@@ -58,7 +61,7 @@ const base = {
   session_status: () => status,
 };
 const status = { setup: "setup-a", mode: "free", owner: true, visibility: "link", viewer_url: null, viewers: 0,
-  created_at: 1, expires_at: 2, run: 3, level: null, levels: null, capture: null };
+  created_at: 1, expires_at: 2, run: 3, level: null, levels: null, capture: null, queue: { state: "none" } };
 const kind = (k, message) => (e) => e instanceof LabError && e.kind === k && (message === undefined || e.message === message);
 
 test("transport: JSON body and SSE body, results unwrapped", async () => {
@@ -70,6 +73,13 @@ test("transport: JSON body and SSE body, results unwrapped", async () => {
     assert.equal(await c.push_to_editor({ files: [{ name: "a.ino", content: "" }] }), "Code sent to the browser.");
     assert.deepEqual(await c.tools(), Object.keys(base).map((name) => ({ name, description: `${name}.` })));
   }
+});
+
+test("list_setups: i18n passed through as the hub serves it", async () => {
+  const setup = { id: "setup-a", title: "Feu", summary: "Un feu.", modes: ["free"], benches: [],
+    i18n: { en: { title: "Light", summary: "A light." } } };
+  const c = new LabClient({ post: fakeHub({ list_setups: () => [setup] }).post });
+  assert.deepEqual(await c.list_setups(), [setup]);
 });
 
 test("transport: unreadable answers, JSON-RPC errors, a throwing post", async () => {
@@ -114,6 +124,23 @@ test("session: kept, filled in, forgotten on close and on gone, restorable", asy
   assert.equal(c.session, null);
 });
 
+test("hub errors: the kind from the _meta code, whatever the text; an unknown code is a hub error", async () => {
+  const hub = fakeHub({
+    ...base,
+    push_to_editor: () => { throw coded("Le navigateur n'est plus là.", "no_browser"); },
+    set_visibility: () => { throw coded("Unknown or ended session.", "rate"); },
+    queue_status: () => { throw coded("Session partie.", "gone"); },
+  });
+  const c = new LabClient({ post: hub.post });
+  await c.open_session({ setup: "setup-a", mode: "free" });
+  await assert.rejects(c.push_to_editor({ files: [{ name: "a.ino", content: "" }] }), kind("no_browser", "Le navigateur n'est plus là."));
+  await assert.rejects(c.set_visibility({ visibility: "link" }), kind("hub", "Unknown or ended session."));
+  assert.deepEqual(c.session, opened);
+  await assert.rejects(c.queue_status(), kind("gone", "Session partie."));
+  assert.equal(c.session, null);
+});
+
+// No _meta: a hub older than contract 0.20, read by its text.
 test("hub errors: their text, no_browser and hub kinds, the session kept", async () => {
   const hub = fakeHub({
     ...base,
@@ -191,6 +218,27 @@ test("status: session_status, nothing else", async () => {
   assert.deepEqual(hub.calls.at(-1).args, { session: "s1", agent_token: "t1" });
 });
 
+test("status: queue and share passed through (contract 0.20)", async () => {
+  const st = { ...status, queue: { state: "turn", kind: "uno", bench: "uno-1", ends_at: 9 }, share: "/p/setup-a.free.0.42.AAAAAAAAAAAAAAAA" };
+  const c = new LabClient({ post: fakeHub({ ...base, session_status: () => st }).post });
+  await c.open_session({ setup: "setup-a", mode: "free" });
+  assert.deepEqual(await c.status(), st);
+});
+
+test("capture_logic with a trigger, decode_capture: forwarded with the session", async () => {
+  const decoded = { capture: "c1", protocol: "uart", frames: [{ t_us: 10, value: 0x55 }], text: "U", next: null, problems: [] };
+  const hub = fakeHub({ ...base, capture_logic: () => ({ capture: "c1", state: "recording" }), decode_capture: () => decoded });
+  const c = new LabClient({ post: hub.post });
+  await c.open_session({ setup: "setup-a", mode: "free" });
+  const trig = { pins: [2, 3], duration_ms: 200, trigger: { pin: 2, edge: "falling" }, wait_ms: 1000, pre_ms: 50 };
+  await c.capture_logic(trig);
+  const dec = { capture: "c1", protocol: "uart", channels: { rx: 2 }, options: { baud: 9600 }, offset: 0 };
+  assert.deepEqual(await c.decode_capture(dec), decoded);
+  assert.deepEqual(hub.calls.slice(1).map((x) => x.args), [
+    { session: "s1", agent_token: "t1", ...trig }, { session: "s1", agent_token: "t1", ...dec },
+  ]);
+});
+
 test("status: capture passed through as the hub gives it", async () => {
   const capture = { id: "c1", kind: "logic", state: "ready" };
   const hub = fakeHub({ ...base, session_status: () => ({ ...status, capture }) });
@@ -206,6 +254,7 @@ test("session tools without a session: gone, no request at all", async () => {
   for (const call of [() => c.status(), () => c.session_status(), () => c.read_simulation(), () => c.push_to_editor({ files: file }),
     () => c.set_visibility({ visibility: "link" }), () => c.queue_join({ kind: "uno" }), () => c.queue_status(), () => c.queue_leave(),
     () => c.close_session(), () => c.capture_logic(), () => c.read_capture({ capture: "c1" }),
+    () => c.decode_capture({ capture: "c1", protocol: "i2c", channels: { scl: 2, sda: 3 } }),
     () => c.capture_analog(), () => c.push_circuit({ components: [], wires: [] }), () => c.bench_snapshot(), () => c.next_level(),
     () => c.brief_submit({ title: "T", with_session: true }),
     () => c.request_meeting({ contact: { name: "A", email: "a@b.c" }, context: "", availabilities: { text: "" }, consent: true, with_session: true })])

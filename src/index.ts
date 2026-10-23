@@ -19,7 +19,12 @@ export interface Session { session: string; agent_token: string; open_url: strin
 export interface File { name: string; content: string }
 export interface Setup {
   id: string; title?: string; summary?: string; modes: Mode[];
-  benches: { kind: string; benches: number; free: number; waiting: number }[];
+  /** available: open_session works; soon: listed, cannot be opened yet. */
+  status?: "available" | "soon";
+  /** status open: offered; soon: announced, not offered yet (counts 0). */
+  benches: { kind: string; benches: number; free: number; waiting: number; status?: "open" | "soon" }[];
+  /** title and summary are French; a non-French client takes i18n.en field by field (contract 0.9.1). */
+  i18n?: { en?: { title?: string; summary?: string } };
 }
 export interface Simulation {
   state: Record<string, any> | null;
@@ -55,6 +60,10 @@ export interface SessionStatus {
   setup: string; mode: Mode; owner: boolean; visibility: Visibility; viewer_url: string | null;
   viewers: number; created_at: number; expires_at: number; run: number;
   level: number | null; levels: number | null; capture: CaptureRef | null;
+  /** The session's place in the bench queue, as queue_status gives it (contract 0.20). */
+  queue: QueueStatus;
+  /** The signed share link, `/p/<share>` (contract 0.20). */
+  share?: string;
 }
 /** The session's capture in session_status (hub v0.6.1): read it with read_capture once, when state turns ready. */
 export interface CaptureRef { id: string; kind: "logic" | "analog"; state: "recording" | "ready" | "failed" }
@@ -79,7 +88,29 @@ interface CaptureBase {
 /** edges [t_us, pin, v], absent with format "png". */
 export interface LogicCapture extends CaptureBase {
   kind: "logic"; channels: CaptureChannel[]; edges?: [number, number, 0 | 1][]; truncated: boolean;
+  /** A triggered capture (contract 0.20); at_us null when no edge came within wait_ms (the whole capture is kept). */
+  trigger?: Trigger & { at_us: number | null };
 }
+export interface Trigger { pin: number; edge: "rising" | "falling" | "any" }
+/** decode_capture's arguments (contract 0.20): a ready logic capture of the session, channels are its pins. */
+export type DecodeArgs = { capture: string; offset?: number } & (
+  | { protocol: "uart"; channels: { rx: number };
+      options?: { baud?: number; bits?: number; parity?: "none" | "even" | "odd"; stop?: 1 | 2; invert?: boolean } }
+  | { protocol: "spi"; channels: { sck: number; mosi?: number; miso?: number; cs?: number };
+      options?: { mode?: 0 | 1 | 2 | 3; bit_order?: "msb" | "lsb"; bits?: number } }
+  | { protocol: "i2c"; channels: { scl: number; sda: number } }
+);
+export interface UartFrame { t_us: number; value: number; error?: "framing" | "parity" }
+export interface SpiFrame { t_us: number; mosi?: number; miso?: number }
+export interface I2cFrame {
+  t_us: number; kind: "start" | "restart" | "address" | "data" | "stop"; value?: number; rw?: "read" | "write"; ack?: boolean;
+}
+/** 2000 frames per page from offset; problems: what makes the decoding doubtful. uart: text, the page's printable bytes. */
+export type Decoded = { capture: string; next: number | null; problems: string[] } & (
+  | { protocol: "uart"; frames: UartFrame[]; text: string }
+  | { protocol: "spi"; frames: SpiFrame[] }
+  | { protocol: "i2c"; frames: I2cFrame[] }
+);
 /** samples: rows of millivolts in the order of pins, row k at k / rate_hz; absent with format "png". */
 export interface AnalogCapture extends CaptureBase {
   kind: "analog"; rate_hz: number; channels: AnalogChannel[]; samples?: number[][];
@@ -104,7 +135,9 @@ export class LabError extends Error {
   constructor(message: string, readonly kind: LabErrorKind = "hub") { super(message); }
 }
 
-// The hub's texts (hub.py): English now, French in older hubs.
+// The hub's error code (contract 0.20), in the tool result's _meta.
+const CODE = "lab.picodev.fr/error";
+// Fallback for hubs older than 0.20, which send no code: their texts, English, French in older hubs still.
 const GONE = /unknown or ended session|session inconnue/i;
 const NO_BROWSER = /no browser is connected|aucun navigateur/i;
 const PREFIX = /^Error executing tool [^:]*: /; // FastMCP's, before the hub's own text
@@ -188,7 +221,9 @@ export class LabClient {
     const text = r?.content?.find((x: any) => x.type === "text")?.text ?? "";
     if (r?.isError) {
       const message = String(text).replace(PREFIX, "");
-      const kind = GONE.test(message) ? "gone" : NO_BROWSER.test(message) ? "no_browser" : "hub";
+      const code = r._meta?.[CODE];
+      const kind: LabErrorKind = code !== undefined ? (code === "gone" || code === "no_browser" ? code : "hub")
+        : GONE.test(message) ? "gone" : NO_BROWSER.test(message) ? "no_browser" : "hub";
       if (kind === "gone") this.session = null;
       throw new LabError(message, kind);
     }
@@ -265,11 +300,17 @@ export class LabClient {
   }
 
   session_status(): Promise<SessionStatus> { return this.withSession("session_status"); }
-  capture_logic(args: { pins?: number[]; duration_ms?: number } = {}): Promise<{ capture: string; state: "recording" }> {
+  /** With a trigger, recording lasts wait_ms + duration_ms; pre_ms (0..wait_ms) kept before the edge (contract 0.20). */
+  capture_logic(args: { pins?: number[]; duration_ms?: number; trigger?: Trigger; wait_ms?: number; pre_ms?: number } = {}):
+  Promise<{ capture: string; state: "recording" }> {
     return this.withSession("capture_logic", args);
   }
   read_capture(args: { capture: string; offset?: number; format?: "json" | "png"; from_ms?: number; to_ms?: number }): Promise<Capture> {
     return this.withSession("read_capture", args);
+  }
+  /** Decodes a ready logic capture of the session: uart, spi or i2c (contract 0.20). */
+  decode_capture<A extends DecodeArgs>(args: A): Promise<Extract<Decoded, { protocol: A["protocol"] }>> {
+    return this.withSession("decode_capture", args);
   }
   capture_analog(args: { pins?: number[]; duration_ms?: number; rate_hz?: number } = {}): Promise<{ capture: string; state: "recording" }> {
     return this.withSession("capture_analog", args);

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.8.0
+
+Contract 0.20.
+
+- Hub errors: `gone` and `no_browser` come from the code in the tool result's `_meta`
+  (`lab.picodev.fr/error`); an unknown code is a `hub` error. The text is read only for a hub that
+  sends no code.
+- `SessionStatus.queue` (the shape of `queue_status`) and `SessionStatus.share` (the signed share link).
+- `capture_logic`: `trigger` (`{ pin, edge }`), `wait_ms`, `pre_ms`; `LogicCapture.trigger` with `at_us`.
+- `decode_capture`: decodes a ready logic capture of the session (uart, spi, i2c), typed by protocol.
+- `Setup.status` (`available` or `soon`) and the `status` of its bench offers (`open` or `soon`).
+- `Setup.i18n`: the English title and summary `list_setups` gives (`{ en: { title, summary } }`).
+
 ## 0.7.1
 
 - First public release, on github.com/PICODEV-SAS/picodev-lab-client. No API change.

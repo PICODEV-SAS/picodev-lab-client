@@ -25,6 +25,12 @@ await lab.close_session();
 par `read_capture` une seule fois, quand `state` passe à `ready` (l'appel est
 signalé au propriétaire) ; le client ne suit pas ce changement.
 
+`status().queue` et `status().share` (contrat 0.20) : la place dans la file du
+banc, comme `queue_status` la rend, et le lien de partage signé (`/p/<partage>`).
+`capture_logic` prend `trigger` (`{ pin, edge }`), `wait_ms` et `pre_ms` ;
+`decode_capture` décode une capture logique prête (`uart`, `spi`, `i2c`), son
+résultat typé selon `protocol`.
+
 `next_level()` (contrat 0.8.3) : en Défi, passe au niveau suivant comme le bouton
 « Niveau suivant » du banc, et rend `{ level, levels }`, le nouveau niveau. Le hub
 le refuse sans rien envoyer (`LabError` `hub`, avec son texte) hors Défi, quand les
@@ -48,7 +54,9 @@ du hub, sans le préfixe « Error executing tool <nom>: » de FastMCP) et un `ki
 `gone` (session inconnue ou finie, ou aucune session tenue), `no_browser` (aucun
 navigateur connecté à la session), `limit` (plus de 8 fichiers ou de 64 Kio, ou un
 circuit de plus de 40 composants ou 120 fils, refusé sans appel), `hub` (toute autre erreur du hub), `transport` (pas de réponse JSON-RPC
-lisible). Un outil de session appelé sans session tenue est refusé `gone` sans
+lisible). `gone` et `no_browser` viennent du code que le hub met dans `_meta` du
+résultat (`lab.picodev.fr/error`, contrat 0.20) ; un code inconnu est une erreur
+`hub`. Le texte n'est lu qu'en repli, pour un hub qui n'envoie pas de code. Un outil de session appelé sans session tenue est refusé `gone` sans
 aucune requête. `lab.session` se lit pour garder la session côté hôte et s'affecte
 pour la reprendre ; il redevient `null` après `close_session` ou `gone`.
 
@@ -58,7 +66,7 @@ flux SSE. Le client n'utilise que le langage, `JSON` et `TextEncoder` : ni `fetc
 (sauf l'envoi par défaut), ni minuteries, ni flux, ni `import()`, ni `new Function`.
 
 Installation dans un hôte, par un tag :
-`npm i github:PICODEV-SAS/picodev-lab-client#v0.7.1` (le script `prepare` compile
+`npm i github:PICODEV-SAS/picodev-lab-client#v0.8.0` (le script `prepare` compile
 `dist/` à l'installation). Sortie CommonJS, Node 20 au moins ; l'envoi par défaut
 est le `fetch` global (Node 20, VS Code).
 
